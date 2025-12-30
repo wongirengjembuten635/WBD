@@ -28,13 +28,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `assignDriver(orderId, driverId)`: Assign driver and update order status
   - `claimOrder(orderId, driverId)`: Driver claims available order (manual assignment)
 
-#### Auto-bid System
-- **AutoBidService**: Automatic driver assignment for ride orders
-  - Distance-based selection: Finds closest online driver
-  - Score calculation: Prioritizes experienced drivers (more completed orders)
-  - Conditional execution: Only runs for ride orders (bike_ride, car_ride)
-  - Skips delivery orders: Delivery orders remain 'waiting' for manual driver assignment
-  - Automatic status update: Updates order status to 'assigned' after driver selection
+#### Auto-bid System (Latest Implementation)
+- **AutoBidService**: Complete automatic driver assignment system
+  - `runAutobid(orderId, orderLat, orderLng)`: Main entry point for auto bid execution
+  - `autoAssignDriver()`: Core logic for finding and assigning closest driver
+  - **Distance Calculation**: Haversine formula for accurate kilometer distance
+  - **Driver Selection Algorithm**:
+    - Filters online drivers only (isOnline = true)
+    - Calculates distance from each driver to order pickup location
+    - Sorts by distance (closest first)
+    - Selects the nearest available driver
+  - **Conditional Execution**: Only runs for ride orders (bike_ride, car_ride)
+  - **Delivery Orders**: Remain 'waiting' for manual driver assignment
+  - **Database Updates**: Automatically updates order status to 'assigned'
+  - **Real-time Integration**: Works seamlessly with order creation flow
 
 #### Authentication System
 - **Login Screen**: Email/password authentication with role-based post-login navigation
@@ -59,11 +66,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Service Type System
 - **Service Type Selection**: Dropdown in order creation screen
-  - Bike Ride (bike_ride)
-  - Car Ride (car_ride)
-  - Bike Delivery (bike_delivery)
-  - Car Delivery (car_delivery)
-  - Conditional autobid: Only triggers for ride services, not delivery
+  - Bike Ride (bike_ride) - Auto bid enabled
+  - Car Ride (car_ride) - Auto bid enabled
+  - Bike Delivery (bike_delivery) - Manual assignment only
+  - Car Delivery (car_delivery) - Manual assignment only
+  - **Smart Logic**: Conditional auto bid based on service type
+
+#### Order Creation Integration
+- **Map-based Order Creation**: Interactive FlutterMap for pickup/dropoff selection
+- **Real-time Distance Calculation**: Automatic price calculation using Haversine formula
+- **Service Type Integration**: Dropdown selection with conditional auto bid
+- **Auto Bid Trigger**: Automatically called after successful order creation for ride orders
+- **User Feedback**: SnackBar notifications for order status and auto bid results
+- **Error Handling**: Comprehensive try-catch blocks with user-friendly messages
 
 #### Core Services
 - **LocationService**: Real-time location tracking using geolocator
@@ -94,29 +109,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Error Display**: User-friendly error messages and loading states
 - **Real-time Feedback**: StreamBuilder for live data updates
 - **Form Validation**: Pre-submission field validation with error messages
+- **Interactive Map**: FlutterMap integration with marker placement
+- **Responsive Design**: Proper layout for different screen sizes
 
 #### Database Integration
 - **Orders Table Fields**:
-  - id: Order identifier
-  - clientId: Reference to client user
-  - driverId: Reference to assigned driver
+  - id: Order identifier (UUID)
+  - clientId: Reference to client user (UUID)
+  - driverId: Reference to assigned driver (UUID, nullable)
   - serviceType: Type of service (ride/delivery)
-  - distanceKm: Order distance in kilometers
-  - price: Order price
+  - distanceKm: Order distance in kilometers (decimal)
+  - price: Order price (decimal)
   - status: Order status (waiting/assigned/completed)
-  - createdAt: Order creation timestamp
+  - createdAt: Order creation timestamp (ISO 8601)
 
 - **Drivers Table Fields**:
-  - user_id: Reference to Supabase Auth user
-  - is_online: Online/offline status boolean
-  - monthly_completed: Counter for completed orders
-  - subscription_active: Subscription status boolean
-  - lat: Current latitude
-  - lng: Current longitude
+  - user_id: Reference to Supabase Auth user (UUID, primary key)
+  - is_online: Online/offline status boolean (default: false)
+  - monthly_completed: Counter for completed orders (integer, default: 0)
+  - subscription_active: Subscription status boolean (default: true)
+  - lat: Current latitude (decimal, nullable)
+  - lng: Current longitude (decimal, nullable)
+
+#### Platform Support
+- **Multi-platform Flutter Project**: Regenerated for all platforms
+  - Android: Full Android support with Gradle configuration
+  - iOS: Complete iOS project with Xcode configuration
+  - Web: Web deployment ready with proper manifest
+  - Windows: Windows desktop application support
+  - Linux: Linux desktop application support
+  - macOS: macOS desktop application support
 
 #### Documentation
 - **README.md**: Comprehensive project documentation with setup instructions
 - **CHANGELOG.md**: This file documenting all changes
+- **Code Comments**: Extensive inline documentation for all major functions
+- **API Documentation**: Clear method signatures and parameter descriptions
 
 ### Changed
 - Fixed column naming consistency: client_id → clientId, distance_km → distanceKm, estimated_price → price, created_at → createdAt
@@ -145,15 +173,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Error messages don't expose sensitive information
 - Supabase Auth JWT tokens used for session management
 
-Note: Future enhancements should include:
-- Email verification before account activation
-- Stronger password requirements and validation
-- Row-Level Security (RLS) policies in Supabase
-- Two-factor authentication (2FA)
-- Rate limiting on auth endpoints
+### Technical Details
+
+#### Auto Bid Algorithm
+```
+1. Client creates order with service type selection
+2. If service type contains 'delivery':
+   - Skip auto bid, order status remains 'waiting'
+   - Manual driver assignment required
+3. If service type is ride ('bike_ride' or 'car_ride'):
+   - Query all drivers with isOnline = true
+   - Calculate distance from each driver to order pickup location
+   - Sort drivers by distance (closest first)
+   - Select the nearest driver
+   - Update order: driverId = selected_driver.id, status = 'assigned'
+   - Return success/failure status
+```
+
+#### Database Schema
+```sql
+-- Orders table
+CREATE TABLE orders (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  clientId UUID NOT NULL REFERENCES auth.users(id),
+  driverId UUID REFERENCES auth.users(id),
+  serviceType TEXT NOT NULL CHECK (serviceType IN ('bike_ride', 'car_ride', 'bike_delivery', 'car_delivery')),
+  distanceKm DECIMAL(10,2) NOT NULL,
+  price DECIMAL(10,2) NOT NULL,
+  status TEXT NOT NULL DEFAULT 'waiting' CHECK (status IN ('waiting', 'assigned', 'completed')),
+  createdAt TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Drivers table
+CREATE TABLE drivers (
+  user_id UUID PRIMARY KEY REFERENCES auth.users(id),
+  is_online BOOLEAN DEFAULT false,
+  monthly_completed INTEGER DEFAULT 0,
+  subscription_active BOOLEAN DEFAULT true,
+  lat DECIMAL(10,8),
+  lng DECIMAL(11,8)
+);
+```
+
+#### Real-time Subscriptions
+- **Orders Stream**: `streamAvailableOrders()` uses Supabase Realtime to listen for status='waiting' orders
+- **Driver Dashboard**: StreamBuilder automatically updates when new orders become available
+- **Auto Assignment**: Real-time updates ensure immediate driver notification
+
+### Performance
+- **Distance Calculation**: Optimized Haversine formula implementation
+- **Real-time Updates**: Efficient Supabase subscriptions with minimal data transfer
+- **Lazy Loading**: FutureBuilder for order history and active orders
+- **Stream Optimization**: Filtered queries to reduce unnecessary data fetching
+
+### Testing
+- **Unit Tests**: Basic widget tests included (widget_test.dart)
+- **Integration Tests**: Manual testing of auto bid flow completed
+- **Platform Testing**: Multi-platform support verified (Android, iOS, Web, Windows)
+- **Real-time Testing**: StreamBuilder functionality confirmed working
+
+### Dependencies
+- **Flutter**: 3.x with Material Design 3 support
+- **Supabase**: Authentication, Database, Real-time subscriptions
+- **Flutter Map**: Interactive map for order creation
+- **Geolocator**: Location services for distance calculation
+- **LatLong2**: Geographic coordinate handling
+- **Provider**: State management (in pubspec but not extensively used yet)
+
+### Future Enhancements
+- [ ] Email verification before account activation
+- [ ] Stronger password requirements and validation
+- [ ] Row-Level Security (RLS) policies in Supabase
+- [ ] Two-factor authentication (2FA)
+- [ ] Rate limiting on auth endpoints
+- [ ] Push notifications for order updates
+- [ ] GPS tracking during active rides
+- [ ] Payment integration
+- [ ] Rating and review system
+- [ ] Admin dashboard for monitoring
+- [ ] Analytics and reporting
+- [ ] Offline support for critical features
 
 ## Version History
 
-### v0.0.1 (Current Development)
-- Initial project structure
-- All features listed above in [Unreleased]
+### v0.0.1 (Current Development) - December 31, 2025
+- Initial project structure with complete ojek online application
+- Full authentication system with role-based access
+- Driver dashboard with real-time order management
+- Auto bid system for automatic driver assignment
+- Order creation with map-based location selection
+- Multi-platform Flutter application (Android, iOS, Web, Windows, Linux, macOS)
+- Supabase backend integration with real-time features
+- Comprehensive documentation and changelog
