@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart' as latlong2;
 import 'package:latlong2/latlong.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/order_service.dart';
+import '../services/autobid_service.dart';
 
 class OrderCreateScreen extends StatefulWidget {
   const OrderCreateScreen({super.key});
@@ -10,17 +14,24 @@ class OrderCreateScreen extends StatefulWidget {
 }
 
 class OrderCreateScreenState extends State<OrderCreateScreen> {
-  LatLng? _pickup;
-  LatLng? _dropoff;
+  latlong2.LatLng? _pickup;
+  latlong2.LatLng? _dropoff;
 
   double? _distanceKm;
   double? _estimatedPrice;
+
+  // Service type selection
+  String _serviceType = 'bike_ride'; // default
+
+  // Services
+  final OrderService _orderService = OrderService();
+  final AutoBidService _autoBidService = AutoBidService();
 
   // Price calculation constants
   final double baseFare = 5.0;
   final double perKmRate = 2.5;
 
-  void _onMapTap(LatLng point) {
+  void _onMapTap(latlong2.LatLng point) {
     setState(() {
       if (_pickup == null) {
         _pickup = point;
@@ -73,9 +84,9 @@ class OrderCreateScreenState extends State<OrderCreateScreen> {
     return FlutterMap(
       options: MapOptions(
         initialCenter: _pickup ??
-            const LatLng(
+            const latlong2.LatLng(
                 37.7749, -122.4194), // Use initialCenter instead of center
-        zoom: 12,
+        initialZoom: 12,
         onTap: (_, point) => _onMapTap(point),
       ),
       children: [
@@ -102,6 +113,28 @@ class OrderCreateScreenState extends State<OrderCreateScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // Service Type Selection
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8.0),
+          child: DropdownButtonFormField<String>(
+            initialValue: _serviceType,
+            decoration: const InputDecoration(
+              labelText: 'Service Type',
+              border: OutlineInputBorder(),
+            ),
+            items: const [
+              DropdownMenuItem(value: 'bike_ride', child: Text('Bike Ride')),
+              DropdownMenuItem(value: 'car_ride', child: Text('Car Ride')),
+              DropdownMenuItem(value: 'bike_delivery', child: Text('Bike Delivery')),
+              DropdownMenuItem(value: 'car_delivery', child: Text('Car Delivery')),
+            ],
+            onChanged: (value) {
+              setState(() {
+                _serviceType = value!;
+              });
+            },
+          ),
+        ),
         ListTile(
           leading: const Icon(Icons.location_on, color: Colors.green),
           title: Text(_pickup == null
@@ -129,6 +162,63 @@ class OrderCreateScreenState extends State<OrderCreateScreen> {
     );
   }
 
+  Future<void> _createOrder() async {
+    try {
+      // Get current user
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please login first')),
+        );
+        return;
+      }
+
+      // Prepare order data
+      final orderData = {
+        'clientId': user.id,
+        'serviceType': _serviceType,
+        'distanceKm': _distanceKm,
+        'price': _estimatedPrice,
+        'status': 'waiting',
+        'createdAt': DateTime.now().toIso8601String(),
+        // Note: pickup and dropoff coordinates could be added to database if needed
+      };
+
+      // Create order
+      final createdOrder = await _orderService.createOrder(orderData);
+      if (createdOrder == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to create order')),
+        );
+        return;
+      }
+
+      // Run auto bid only for ride services (not delivery)
+      if (!_serviceType.contains('delivery')) {
+        await _autoBidService.runAutobid(
+          createdOrder['id'],
+          _pickup!.latitude,
+          _pickup!.longitude,
+        );
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Order created! Auto-assigning driver...')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Delivery order created! Waiting for manual driver assignment')),
+        );
+      }
+
+      // Navigate back or to order status screen
+      Navigator.of(context).pop();
+
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error creating order: $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -149,11 +239,8 @@ class OrderCreateScreenState extends State<OrderCreateScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16.0),
               child: ElevatedButton(
                 onPressed: (_pickup != null && _dropoff != null)
-                    ? () {
-                        // Proceed with order submission (to be implemented)
-                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                            content: Text(
-                                "Order created! (Submission logic not implemented.)")));
+                    ? () async {
+                        await _createOrder();
                       }
                     : null,
                 child: const Text("Create Order"),

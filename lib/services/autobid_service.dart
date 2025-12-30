@@ -12,6 +12,21 @@ class AutoBidService {
   final SupabaseClient _client = Supabase.instance.client;
   final LocationService _locationService = LocationService();
 
+  /// Main method untuk menjalankan auto bid system
+  Future<void> runAutobid(String orderId, double orderLat, double orderLng) async {
+    final result = await autoAssignDriver(
+      orderId: orderId,
+      orderLat: orderLat,
+      orderLng: orderLng,
+    );
+
+    if (result != null) {
+      print('Auto bid berhasil: Driver ${result['driver']['id']} assigned, jarak ${result['distance_km']} km');
+    } else {
+      print('Auto bid gagal: Tidak ada driver tersedia');
+    }
+  }
+
   /// Cari driver aktif & assign otomatis ke order terdekat tanpa biaya.
   Future<Map<String, dynamic>?> autoAssignDriver({
     required String orderId,
