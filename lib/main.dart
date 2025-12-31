@@ -1,17 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:firebase_core/firebase_core.dart';
 
 import 'app.dart';
 import 'screens/login_screen.dart';
+import 'services/firebase_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // Initialize Supabase
   await Supabase.initialize(
     url: 'https://olhykkhbsihoglyrwpda.supabase.co',
     anonKey:
         'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9saHlra2hic2lob2dseXJ3cGRhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY0MzAzNjAsImV4cCI6MjA4MjAwNjM2MH0.RyDS9tAeBt-i7gG7segs4RiXN_FGFvabkbpfADHQSlg',
   );
+
+  // Initialize Firebase
+  await FirebaseService.initialize();
 
   runApp(const MyApp());
 }

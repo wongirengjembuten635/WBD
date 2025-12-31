@@ -13,7 +13,8 @@ class AutoBidService {
   final LocationService _locationService = LocationService();
 
   /// Main method untuk menjalankan auto bid system
-  Future<void> runAutobid(String orderId, double orderLat, double orderLng) async {
+  Future<void> runAutobid(
+      String orderId, double orderLat, double orderLng) async {
     final result = await autoAssignDriver(
       orderId: orderId,
       orderLat: orderLat,
@@ -21,7 +22,8 @@ class AutoBidService {
     );
 
     if (result != null) {
-      print('Auto bid berhasil: Driver ${result['driver']['id']} assigned, jarak ${result['distance_km']} km');
+      print(
+          'Auto bid berhasil: Driver ${result['driver']['id']} assigned, jarak ${result['distance_km']} km');
     } else {
       print('Auto bid gagal: Tidak ada driver tersedia');
     }
@@ -73,21 +75,13 @@ class AutoBidService {
 
   Future<List<Map<String, dynamic>>> _fetchOnlineDrivers() async {
     final result = await _client.from('drivers').select().eq('isOnline', true);
-    if (result is List) {
-      return List<Map<String, dynamic>>.from(result);
-    }
-    return [];
+    return List<Map<String, dynamic>>.from(result);
   }
 
   Future<bool> _assignDriverToOrder({
     required String orderId,
     required String driverId,
   }) async {
-    final result = await _client
-        .from('orders')
-        .update({'driverId': driverId, 'status': 'assigned'}).eq('id', orderId);
-    // Supabase Dart no longer requires .execute(), .update returns a PostgrestResponse or directly throws.
-    // We should try/catch and check 'count' or if an exception is thrown
     try {
       final result = await _client
           .from('orders')
@@ -96,7 +90,7 @@ class AutoBidService {
           .select(); // To get the updated row and response status
 
       // Result is a List if successful, empty list if nothing updated.
-      if (result is List && result.isNotEmpty) {
+      if (result.isNotEmpty) {
         return true;
       } else {
         return false;

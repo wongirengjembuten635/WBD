@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/order_service.dart';
+import '../services/ride_tracking_service.dart';
+import 'ride_tracking_screen.dart';
 
 class HomeDriverScreen extends StatefulWidget {
   const HomeDriverScreen({super.key});
@@ -14,6 +17,10 @@ class _HomeDriverScreenState extends State<HomeDriverScreen> {
   double? _currentLng;
   bool locationLoading = true;
   Future<Map<String, dynamic>?>? _driverFuture;
+  Future<List<Map<String, dynamic>>>? _activeOrdersFuture;
+
+  final OrderService _orderService = OrderService();
+  final RideTrackingService _rideTrackingService = RideTrackingService();
 
   @override
   void initState() {
@@ -23,6 +30,7 @@ class _HomeDriverScreenState extends State<HomeDriverScreen> {
 
   Future<void> _init() async {
     _driverFuture = _fetchAndInitDriver();
+    _activeOrdersFuture = _fetchActiveOrders();
     await _fetchLocationAndSave();
     setState(() {});
   }
@@ -43,6 +51,7 @@ class _HomeDriverScreenState extends State<HomeDriverScreen> {
       return response;
     }
 
+    // Create initial driver record if it doesn't exist
     final initialData = {
       'user_id': uid,
       'is_online': false,
@@ -53,6 +62,24 @@ class _HomeDriverScreenState extends State<HomeDriverScreen> {
     };
     await supabase.from('drivers').insert(initialData);
     return initialData;
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchActiveOrders() async {
+    if (_user == null) return [];
+
+    try {
+      final response = await supabase
+          .from('orders')
+          .select()
+          .eq('driverId', _user!.id)
+          .or('status.eq.assigned,status.eq.in_progress')
+          .order('createdAt', ascending: false);
+
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      print('Error fetching active orders: $e');
+      return [];
+    }
   }
 
   // UPGRADED: Place to plug in real location service in future
@@ -95,97 +122,120 @@ class _HomeDriverScreenState extends State<HomeDriverScreen> {
 
   void _handleLogout() async {
     await supabase.auth.signOut();
-    if (!mounted) return;
-    Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+    if (mounted) {
+      Navigator.of(context).pushReplacementNamed('/login');
+    }
   }
 
-  Widget _statusRow(bool isOnline) {
-    return Row(
-      children: [
-        const Text(
-          "Status:",
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(width: 10),
-        Switch(
-          value: isOnline,
-          onChanged: (val) async {
-            final driver = await _driverFuture;
-            if (driver != null) {
-              await _toggleOnline(val, driver);
-            }
-          },
-          activeColor: Colors.green,
-          inactiveThumbColor: Colors.red,
-        ),
-        const SizedBox(width: 8),
-        Text(
-          isOnline ? "ONLINE" : "OFFLINE",
-          style: TextStyle(
-            color: isOnline ? Colors.green : Colors.red,
-            fontWeight: FontWeight.bold,
+  Future<void> _startRideTracking(Map<String, dynamic> order) async {
+    final orderId = order['id'];
+    try {
+      await _rideTrackingService.startRideTracking(
+        orderId: orderId,
+        driverId: _user!.id,
+      );
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => RideTrackingScreen(
+              orderId: orderId,
+              driverId: _user!.id,
+              orderData: order,
+            ),
           ),
-        ),
-      ],
-    );
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to start ride tracking: $e')),
+        );
+      }
+    }
   }
 
-  Widget _locationRow(double? lat, double? lng) {
-    return Row(
-      children: [
-        const Icon(Icons.location_on),
-        const SizedBox(width: 8),
-        locationLoading
-            ? const Text("Memuat lokasi ...")
-            : (lat != null && lng != null)
-                ? Text(
-                    "Lokasi: ${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}",
-                  )
-                : const Text("Lokasi tidak diketahui"),
-        const Spacer(),
-        IconButton(
-          tooltip: "Refresh lokasi",
-          icon: const Icon(Icons.refresh),
-          onPressed: () async {
-            await _fetchLocationAndSave();
-            setState(() {
-              _driverFuture = _fetchAndInitDriver();
-            });
-          },
-        ),
-      ],
-    );
+  Future<void> _refreshData() async {
+    setState(() {
+      _activeOrdersFuture = _fetchActiveOrders();
+    });
   }
 
-  Widget _monthlyOrderRow(int monthlyCompleted) {
-    return Row(
-      children: [
-        const Icon(Icons.assignment_turned_in),
-        const SizedBox(width: 8),
-        Text(
-          "Order bulan ini: $monthlyCompleted / 10",
-          style: const TextStyle(fontWeight: FontWeight.w500),
-        ),
-      ],
-    );
-  }
+  Widget _buildActiveOrders() {
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: _activeOrdersFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
 
-  Widget _subscriptionRow(bool subscriptionActive) {
-    return Row(
-      children: [
-        Icon(
-          Icons.stars,
-          color: subscriptionActive ? Colors.orange : Colors.grey,
-        ),
-        const SizedBox(width: 8),
-        Text(
-          subscriptionActive ? 'Status: Gratis' : 'Perlu bayar bulan depan',
-          style: TextStyle(
-            color: subscriptionActive ? Colors.orange : Colors.red,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-      ],
+        if (snapshot.hasError) {
+          return Center(child: Text('Error: ${snapshot.error}'));
+        }
+
+        final orders = snapshot.data ?? [];
+        if (orders.isEmpty) {
+          return const Center(
+            child: Text(
+              'No active orders',
+              style: TextStyle(fontSize: 16, color: Colors.grey),
+            ),
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Active Orders',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Colors.blue,
+              ),
+            ),
+            const SizedBox(height: 10),
+            ...orders.map((order) => Card(
+                  margin: const EdgeInsets.only(bottom: 10),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Order #${order['id']?.toString().substring(0, 8) ?? 'Unknown'}',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text('Service: ${order['serviceType'] ?? 'Unknown'}'),
+                        Text('Status: ${order['status'] ?? 'Unknown'}'),
+                        Text('Price: Rp ${order['price']?.toString() ?? '0'}'),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                icon: const Icon(Icons.play_arrow),
+                                label: const Text('Start Ride'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.green,
+                                  foregroundColor: Colors.white,
+                                ),
+                                onPressed: () => _startRideTracking(order),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                )),
+          ],
+        );
+      },
     );
   }
 
@@ -194,60 +244,199 @@ class _HomeDriverScreenState extends State<HomeDriverScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Driver Dashboard'),
+        backgroundColor: Colors.blue,
+        foregroundColor: Colors.white,
         actions: [
           IconButton(
-            tooltip: 'Keluar',
-            icon: const Icon(Icons.logout),
-            onPressed: _handleLogout,
+            icon: const Icon(Icons.refresh),
+            onPressed: _refreshData,
           ),
         ],
       ),
       body: FutureBuilder<Map<String, dynamic>?>(
         future: _driverFuture,
-        builder: (context, snap) {
-          if (snap.connectionState == ConnectionState.waiting) {
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
-          final driver = snap.data;
-          if (driver == null) {
-            return const Center(child: Text('Gagal memuat data driver.'));
+
+          if (snapshot.hasError) {
+            return Center(child: Text('Error: ${snapshot.error}'));
           }
 
-          final monthlyCompleted = driver['monthly_completed'] ?? 0;
-          final isOnline = driver['is_online'] ?? false;
-          bool subscriptionActive = (monthlyCompleted < 10);
-          final lat = driver['lat'] ?? _currentLat;
-          final lng = driver['lng'] ?? _currentLng;
+          final driver = snapshot.data;
+          if (driver == null) {
+            return const Center(child: Text('Failed to load driver data'));
+          }
 
-          return RefreshIndicator(
-            onRefresh: () async {
-              _driverFuture = _fetchAndInitDriver();
-              await _fetchLocationAndSave();
-              setState(() {});
-            },
-            child: ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.symmetric(horizontal: 20),
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const SizedBox(height: 30),
-                _statusRow(isOnline),
-                const SizedBox(height: 16),
-                _locationRow(lat, lng),
-                const SizedBox(height: 16),
-                _monthlyOrderRow(monthlyCompleted),
-                const SizedBox(height: 16),
-                _subscriptionRow(subscriptionActive),
-                if (!subscriptionActive) ...[
-                  const SizedBox(height: 12),
-                  const Text(
-                    "Anda sudah mencapai limit 10 order/bulan. Layanan gratis selesai, silakan hubungi admin untuk info lebih lanjut.",
-                    style: TextStyle(
-                      color: Colors.red,
-                      fontWeight: FontWeight.bold,
+                // Driver Status Section
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Driver Status',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            const Text('Online Status:'),
+                            const SizedBox(width: 10),
+                            Switch(
+                              value: driver['is_online'] ?? false,
+                              activeThumbColor: Colors.green,
+                              onChanged: (value) =>
+                                  _toggleOnline(value, driver),
+                            ),
+                            const SizedBox(width: 10),
+                            Text(
+                              (driver['is_online'] ?? false)
+                                  ? 'Online'
+                                  : 'Offline',
+                              style: TextStyle(
+                                color: (driver['is_online'] ?? false)
+                                    ? Colors.green
+                                    : Colors.red,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                            'Monthly Completed: ${driver['monthly_completed'] ?? 0}'),
+                        Text(
+                            'Subscription: ${(driver['subscription_active'] ?? true) ? 'Active' : 'Inactive'}'),
+                      ],
                     ),
                   ),
-                ],
-                const SizedBox(height: 40),
+                ),
+                const SizedBox(height: 20),
+
+                // Location Section
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Current Location',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        if (locationLoading)
+                          const CircularProgressIndicator()
+                        else
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                  'Latitude: ${_currentLat?.toStringAsFixed(6) ?? 'N/A'}'),
+                              Text(
+                                  'Longitude: ${_currentLng?.toStringAsFixed(6) ?? 'N/A'}'),
+                            ],
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                // Available Orders Section
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Available Orders',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        StreamBuilder<List<Map<String, dynamic>>>(
+                          stream: _orderService.streamAvailableOrders(),
+                          builder: (context, snapshot) {
+                            if (snapshot.connectionState ==
+                                ConnectionState.waiting) {
+                              return const Center(
+                                  child: CircularProgressIndicator());
+                            }
+
+                            if (snapshot.hasError) {
+                              return Text('Error: ${snapshot.error}');
+                            }
+
+                            final orders = snapshot.data ?? [];
+                            if (orders.isEmpty) {
+                              return const Text(
+                                'No available orders at the moment',
+                                style: TextStyle(color: Colors.grey),
+                              );
+                            }
+
+                            return Column(
+                              children: orders
+                                  .map((order) => ListTile(
+                                        title: Text(
+                                            'Order #${order['id']?.toString().substring(0, 8) ?? 'Unknown'}'),
+                                        subtitle: Text(
+                                            '${order['serviceType'] ?? 'Unknown'} - Rp ${order['price']?.toString() ?? '0'}'),
+                                        trailing: ElevatedButton(
+                                          child: const Text('Ambil Order'),
+                                          onPressed: () async {
+                                            try {
+                                              await _orderService.assignDriver(
+                                                orderId: order['id'],
+                                                driverId: _user!.id,
+                                              );
+                                              ScaffoldMessenger.of(context)
+                                                  .showSnackBar(
+                                                const SnackBar(
+                                                    content: Text(
+                                                        'Order assigned successfully!')),
+                                              );
+                                              _refreshData();
+                                            } catch (e) {
+                                              ScaffoldMessenger.of(context)
+                                                  .showSnackBar(
+                                                SnackBar(
+                                                    content: Text(
+                                                        'Failed to assign order: $e')),
+                                              );
+                                            }
+                                          },
+                                        ),
+                                      ))
+                                  .toList(),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                _buildActiveOrders(),
+                const SizedBox(height: 20),
                 Center(
                   child: ElevatedButton.icon(
                     icon: const Icon(Icons.logout),

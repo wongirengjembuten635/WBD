@@ -29,12 +29,39 @@ A complete ride-hailing and delivery platform built with Flutter and Supabase, f
 - **Auto Bid System**: Automatic driver assignment for ride orders
 - **Manual Assignment**: Delivery orders require manual driver selection
 
-### 🤖 Auto Bid System
-- **Smart Driver Assignment**: Automatically assigns closest available driver
-- **Distance-based Selection**: Haversine formula for accurate distance calculation
-- **Conditional Logic**: Only for ride orders (bike_ride, car_ride)
-- **Real-time Updates**: Instant order status changes
-- **Performance Optimized**: Efficient algorithm for quick assignments
+### 🤖 Auto Bid System (Latest Implementation)
+- **AutoBidService**: Complete automatic driver assignment system
+  - `runAutobid(orderId, orderLat, orderLng)`: Main entry point for auto bid execution
+  - `autoAssignDriver()`: Core logic for finding and assigning closest driver
+  - **Distance Calculation**: Haversine formula for accurate distance calculation
+  - **Driver Selection Algorithm**:
+    - Filters online drivers only (isOnline = true)
+    - Calculates distance from each driver to order pickup location
+    - Sorts by distance (closest first)
+    - Selects the nearest available driver
+  - **Conditional Execution**: Only runs for ride orders (bike_ride, car_ride)
+  - **Delivery Orders**: Remain 'waiting' for manual driver assignment
+  - **Database Updates**: Automatically updates order status to 'assigned'
+  - **Real-time Integration**: Works seamlessly with order creation flow
+
+### 📱 Push Notifications (NEW)
+- **Firebase Cloud Messaging**: Real-time push notifications
+- **Order Updates**: Instant notifications for order status changes
+- **Driver Assignment**: Alerts when driver is assigned
+- **Ride Tracking**: Notifications during active rides
+- **Local Notifications**: Fallback notifications when app is in foreground
+- **Topic-based Messaging**: Subscribe to relevant notification topics
+
+### 🚗 GPS Tracking & Ride Management (NEW)
+- **Real-time GPS Tracking**: Live location updates during rides
+- **RideTrackingService**: Comprehensive ride tracking system
+  - Automatic location updates every 10 seconds
+  - Route recording with timestamps and accuracy
+  - Distance and duration calculations
+  - Real-time location sharing with clients
+- **Interactive Ride Map**: Visual tracking with route display
+- **Ride Completion**: Automatic status updates and notifications
+- **Route Storage**: Complete route data saved to database
 
 ### 📱 Multi-Platform Support
 - **Android**: Full Android application support
@@ -53,6 +80,22 @@ A complete ride-hailing and delivery platform built with Flutter and Supabase, f
 - **Location**: Geolocator for GPS services
 - **State Management**: Provider pattern
 - **Real-time**: Supabase Realtime subscriptions
+- **Push Notifications**: Firebase Cloud Messaging
+
+### Dependencies
+
+#### Core Dependencies
+- **supabase_flutter**: ^2.12.0 - Supabase Flutter client for backend services
+- **provider**: ^6.1.2 - State management solution
+- **geolocator**: ^11.0.0 - GPS location services and permissions
+- **http**: ^1.2.1 - HTTP client for API calls
+- **flutter_map**: ^6.1.0 - Interactive maps with OpenStreetMap tiles
+- **latlong2**: ^0.9.0 - Geographic coordinate calculations
+- **cupertino_icons**: ^1.0.2 - iOS-style icons
+
+#### Push Notifications (NEW)
+- **firebase_core**: ^4.3.0 - Firebase core functionality
+- **firebase_messaging**: ^16.1.0 - Firebase Cloud Messaging for push notifications
 
 ### Project Structure
 ```
@@ -147,11 +190,18 @@ CREATE TABLE drivers (
    );
    ```
 
-4. **Set up database tables**
+4. **Set up Firebase (for Push Notifications)**
+   - Create a new project at [Firebase Console](https://console.firebase.google.com/)
+   - Add Android/iOS apps to your Firebase project
+   - Download `google-services.json` (Android) and `GoogleService-Info.plist` (iOS)
+   - Place files in `android/app/` and `ios/Runner/` respectively
+   - Enable Firebase Cloud Messaging in the Firebase Console
+
+5. **Set up database tables**
    - Run the SQL scripts from the Database Schema section above
    - Enable Row Level Security (RLS) policies as needed
 
-5. **Run the application**
+6. **Run the application**
    ```bash
    # For Android
    flutter run -d android
@@ -172,6 +222,7 @@ Create a `.env` file in the root directory:
 ```env
 SUPABASE_URL=your_supabase_project_url
 SUPABASE_ANON_KEY=your_supabase_anon_key
+FIREBASE_SERVER_KEY=your_firebase_server_key
 ```
 
 ## 📱 Usage
@@ -200,10 +251,18 @@ SUPABASE_ANON_KEY=your_supabase_anon_key
 3. Configure authentication providers (Email/Password)
 4. Set up storage buckets if needed for profile images
 
+### Firebase Setup (for Push Notifications)
+1. Enable Firebase Cloud Messaging in Firebase Console
+2. Get your Server Key from Firebase Console > Project Settings > Cloud Messaging
+3. Add the Server Key to your `.env` file as `FIREBASE_SERVER_KEY`
+4. Configure notification permissions in Android/iOS manifests
+5. Test notifications using Firebase Console or API calls
+
 ### App Configuration
 - **Map Settings**: Configure OpenStreetMap tile servers in `order_create_screen.dart`
 - **Pricing**: Adjust base fare and per-km rates in `order_create_screen.dart`
 - **Distance Calculation**: Modify Haversine parameters in `autobid_service.dart`
+- **GPS Tracking**: Configure update intervals in `ride_tracking_service.dart`
 
 ## 🧪 Testing
 
@@ -266,6 +325,40 @@ await autoBidService.autoAssignDriver(
 );
 ```
 
+### Firebase Service (NEW)
+```dart
+// Initialize Firebase
+await firebaseService.initialize();
+
+// Send push notification
+await firebaseService.sendNotification(
+  title: 'Order Update',
+  body: 'Your order has been assigned',
+  token: userToken,
+);
+
+// Subscribe to topic
+await firebaseService.subscribeToTopic('orders');
+
+// Get FCM token
+final token = await firebaseService.getToken();
+```
+
+### Ride Tracking Service (NEW)
+```dart
+// Start ride tracking
+await rideTrackingService.startRideTracking(orderId);
+
+// Stop ride tracking
+await rideTrackingService.stopRideTracking();
+
+// Get current route
+final route = await rideTrackingService.getCurrentRoute();
+
+// Calculate distance and duration
+final stats = await rideTrackingService.getRideStats();
+```
+
 ## 🤝 Contributing
 
 1. Fork the repository
@@ -288,13 +381,15 @@ await autoBidService.autoAssignDriver(
 - Auto bid system
 - Real-time updates
 - Multi-platform support
+- **Push notifications** ✅
+- **GPS tracking during rides** ✅
 
 ### Phase 2 (Upcoming)
 - [ ] Payment integration (Stripe/PayPal)
-- [ ] Push notifications
-- [ ] GPS tracking during rides
 - [ ] Rating and review system
 - [ ] Admin dashboard
+- [ ] Email verification system
+- [ ] Row-Level Security (RLS) policies
 
 ### Phase 3 (Future)
 - [ ] Advanced analytics
@@ -321,6 +416,20 @@ await autoBidService.autoAssignDriver(
 - Verify Supabase credentials
 - Check user role metadata
 - Ensure email verification if enabled
+
+**Push notifications not working**
+- Verify Firebase configuration files are in correct locations
+- Check Firebase Server Key in `.env` file
+- Ensure notification permissions are granted
+- Test with Firebase Console notification composer
+- Check device token registration in logs
+
+**GPS tracking issues**
+- Verify location permissions in app settings
+- Check GPS accuracy and signal strength
+- Ensure background location permission (Android)
+- Verify Supabase connection for location updates
+- Check ride tracking service initialization
 
 ### Debug Commands
 ```bash

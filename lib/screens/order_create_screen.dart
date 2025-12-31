@@ -125,8 +125,10 @@ class OrderCreateScreenState extends State<OrderCreateScreen> {
             items: const [
               DropdownMenuItem(value: 'bike_ride', child: Text('Bike Ride')),
               DropdownMenuItem(value: 'car_ride', child: Text('Car Ride')),
-              DropdownMenuItem(value: 'bike_delivery', child: Text('Bike Delivery')),
-              DropdownMenuItem(value: 'car_delivery', child: Text('Car Delivery')),
+              DropdownMenuItem(
+                  value: 'bike_delivery', child: Text('Bike Delivery')),
+              DropdownMenuItem(
+                  value: 'car_delivery', child: Text('Car Delivery')),
             ],
             onChanged: (value) {
               setState(() {
@@ -201,17 +203,19 @@ class OrderCreateScreenState extends State<OrderCreateScreen> {
           _pickup!.longitude,
         );
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Order created! Auto-assigning driver...')),
+          const SnackBar(
+              content: Text('Order created! Auto-assigning driver...')),
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Delivery order created! Waiting for manual driver assignment')),
+          const SnackBar(
+              content: Text(
+                  'Delivery order created! Waiting for manual driver assignment')),
         );
       }
 
       // Navigate back or to order status screen
       Navigator.of(context).pop();
-
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error creating order: $e')),

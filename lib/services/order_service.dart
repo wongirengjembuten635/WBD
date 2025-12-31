@@ -9,9 +9,6 @@ class OrderService {
       Map<String, dynamic> orderData) async {
     final response =
         await _client.from(table).insert(orderData).select().single();
-    if (response == null || response is! Map<String, dynamic>) {
-      return null;
-    }
     return response;
   }
 
@@ -19,7 +16,7 @@ class OrderService {
   Future<Map<String, dynamic>?> getOrderById(String orderId) async {
     final response =
         await _client.from(table).select().eq('id', orderId).maybeSingle();
-    if (response == null || response is! Map<String, dynamic>) {
+    if (response == null) {
       return null;
     }
     return response;
@@ -42,17 +39,22 @@ class OrderService {
     required String orderId,
     required String driverId,
   }) async {
-    final response = await _client
+    await _client
         .from(table)
         .update({
-          'workerId': driverId,
+          'driverId': driverId,
           'status': 'assigned',
         })
         .eq('id', orderId)
         .select()
         .single();
 
-    // Jika response null, update gagal. Jika Map, sukses.
-    return response != null && response is Map<String, dynamic>;
+    return true;
+  }
+
+  /// Stream available orders untuk driver
+  Stream<List<Map<String, dynamic>>> streamAvailableOrders() {
+    return _client.from('$table:status=eq.waiting').stream(
+        primaryKey: ['id']).map((rows) => rows.cast<Map<String, dynamic>>());
   }
 }
